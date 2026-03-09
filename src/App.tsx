@@ -83,7 +83,7 @@ export default function App() {
     [],
   );
 
-  const generateShortUrl = useCallback(async () => {
+  const fetchPageTitle = useCallback(async () => {
     setLoading(true);
     setResult('');
     setStatus('idle');
@@ -94,7 +94,7 @@ export default function App() {
       }
       const table = await bitable.base.getTableById(selection.tableId);
       const longField = await table.getFieldByName('網址');
-      const shortField = await table.getFieldByName('短網址');
+      const titleField = await table.getFieldByName('網頁標題');
       const val = await longField.getValue(selection.recordId);
       const longUrl = cellToString(val);
       if (!longUrl) {
@@ -103,16 +103,18 @@ export default function App() {
         setStatus('error');
         return;
       }
-      const resp = await fetch(
-        `https://tinyurl.com/api-create.php?url=${encodeURIComponent(longUrl)}`,
-      );
-      const text = await resp.text();
-      if (!resp.ok || !text || /^Error/i.test(text)) {
-        throw new Error('tinyurl error');
+      const resp = await fetch(longUrl);
+      const html = await resp.text();
+      if (!resp.ok || !html) {
+        throw new Error('fetch error');
       }
-      const shortUrl = text;
-      await shortField.setValue(selection.recordId, shortUrl);
-      setResult(shortUrl);
+      const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const title = m ? m[1].trim() : '';
+      if (!title) {
+        throw new Error('no title');
+      }
+      await titleField.setValue(selection.recordId, title);
+      setResult(title);
       setStatus('success');
     } catch {
       setResult('生成失敗，請確認網址是否正確');
@@ -131,21 +133,21 @@ export default function App() {
     } catch {}
   }, [status, result]);
 
-  const bulkGenerateEmptyShortUrls = useCallback(async () => {
+  const bulkFetchEmptyTitles = useCallback(async () => {
     setBulkLoading(true);
     setBulkProgress('');
     setBulkSummary('');
     try {
       const table = await bitable.base.getActiveTable();
       const longField = await table.getFieldByName('網址');
-      const shortField = await table.getFieldByName('短網址');
+      const titleField = await table.getFieldByName('網頁標題');
       const recordIds = await table.getRecordIdList();
 
       const candidates: Array<{ recordId: string; longUrl: string }> = [];
       for (const recordId of recordIds) {
         const longVal = cellToString(await longField.getValue(recordId));
-        const shortVal = cellToString(await shortField.getValue(recordId));
-        if (longVal && !shortVal) {
+        const titleVal = cellToString(await titleField.getValue(recordId));
+        if (longVal && !titleVal) {
           candidates.push({ recordId, longUrl: longVal });
         }
       }
@@ -158,14 +160,17 @@ export default function App() {
         index += 1;
         setBulkProgress(`正在處理第 ${index} / 共 ${total} 行...`);
         try {
-          const resp = await fetch(
-            `https://tinyurl.com/api-create.php?url=${encodeURIComponent(item.longUrl)}`,
-          );
-          const text = await resp.text();
-          if (!resp.ok || !text || /^Error/i.test(text)) {
-            throw new Error('tinyurl error');
+          const resp = await fetch(item.longUrl);
+          const html = await resp.text();
+          if (!resp.ok || !html) {
+            throw new Error('fetch error');
           }
-          await shortField.setValue(item.recordId, text);
+          const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+          const title = m ? m[1].trim() : '';
+          if (!title) {
+            throw new Error('no title');
+          }
+          await titleField.setValue(item.recordId, title);
           success += 1;
         } catch {
           failure += 1;
@@ -195,17 +200,17 @@ export default function App() {
         <button
           style={styles.btnPrimary}
           disabled={bulkLoading || loading}
-          onClick={bulkGenerateEmptyShortUrls}
+          onClick={bulkFetchEmptyTitles}
         >
-          {bulkLoading ? '生成中...' : '批量生成空白短網址'}
+          {bulkLoading ? '生成中...' : '批量抓取網頁標題'}
         </button>
         <div style={styles.gap} />
         <button
           style={styles.btnSecondary}
           disabled={loading || bulkLoading}
-          onClick={generateShortUrl}
+          onClick={fetchPageTitle}
         >
-          生成短網址
+          抓取網頁標題
         </button>
         {(bulkLoading || bulkSummary) && (
           <div style={styles.progress}>
